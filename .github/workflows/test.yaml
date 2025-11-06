@@ -46,3 +46,97 @@ jobs:
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  test-vtty-linux:
+    name: Test with vtty virtual serial ports
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          allow-prereleases: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Install kernel headers
+        id: kernel-headers
+        run: |
+          set +e
+          # Primary: Try exact kernel version
+          sudo apt-get install -y linux-headers-$(uname -r) 2>/dev/null
+          if [ $? -eq 0 ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Fallback 1: Try generic headers for kernel series
+          KERNEL_VERSION=$(uname -r | sed 's/-[^-]*$//')
+          sudo apt-get install -y linux-headers-${KERNEL_VERSION}-generic 2>/dev/null
+          if [ $? -eq 0 ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Fallback 2: Try any available headers for major version
+          KERNEL_MAJOR=$(uname -r | cut -d. -f1-2)
+          sudo apt-get install -y "linux-headers-*${KERNEL_MAJOR}*" 2>/dev/null
+          if [ $? -eq 0 ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "WARNING: No matching kernel headers found"
+          echo "available=false" >> $GITHUB_OUTPUT
+
+      - name: Build vtty module
+        if: steps.kernel-headers.outputs.available == 'true'
+        run: |
+          git clone https://github.com/anszom/vtty.git vtty-module
+          cd vtty-module
+          make
+          sudo insmod vtty.ko
+          sudo chmod 666 /dev/vtmx
+          lsmod | grep vtty
+
+      - name: Install test dependencies
+        if: steps.kernel-headers.outputs.available == 'true'
+        run: |
+          uv pip install --system -e .
+          uv pip install --system pytest pytest-cov
+
+      - name: Create vtty helper script
+        if: steps.kernel-headers.outputs.available == 'true'
+        run: |
+          mkdir -p ci
+          cp scripts/ci_vtty_helper.py ci/
+
+      - name: Run tests with vtty
+        if: steps.kernel-headers.outputs.available == 'true'
+        run: |
+          eval $(python3 scripts/ci_vtty_helper.py)
+          pytest -v --cov=serial --cov-report=xml --cov-report=term --tb=short
+
+      - name: Upload coverage to Codecov
+        if: steps.kernel-headers.outputs.available == 'true'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+      - name: Cleanup
+        if: always() && steps.kernel-headers.outputs.available == 'true'
+        run: |
+          sudo rmmod vtty || true
