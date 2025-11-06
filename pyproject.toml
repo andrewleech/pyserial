@@ -37,6 +37,12 @@ pyserial-ports = "serial.tools.list_ports:main"
 cp2110 = [
     "hidapi",
 ]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-randomly>=3.0",
+    "taskipy>=1.13",
+]
 
 [project.urls]
 Source = "https://github.com/pyserial/pyserial"
@@ -48,3 +54,21 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 version = {attr = "serial.__version__"}
+
+[tool.taskipy.tasks]
+# Test tasks
+test = "pytest"
+test-cov = "pytest --cov=serial --cov-report=term --cov-report=html"
+test-file = "pytest {args}"
+list-ports = "python test/list_available_ports.py --by-id"
+test-hardware = "pytest --port={PORT} {args}"
+test-hardware-first = "bash -c 'PORT=$(python test/list_available_ports.py --by-id --first 2>/dev/null) && echo \"Auto-detected port: $PORT\" && echo \"Ensure loopback jumpers are installed (TX-RX, RTS-CTS, DTR-DSR)\" && pytest --port=\"$PORT\" {args}'"
+test-hardware-select = "bash -c 'PORT=$(python test/list_available_ports.py --by-id --select) && echo \"Testing with: $PORT\" && echo \"Ensure loopback jumpers are installed (TX-RX, RTS-CTS, DTR-DSR)\" && pytest --port=\"$PORT\" {args}'"
+test-all = "bash -c 'for ver in 3.10 3.11 3.12 3.13 3.14; do echo \"\"; echo \"Testing Python $ver...\"; uv run --python $ver pytest || echo \"Python $ver not available\"; done'"
+
+# Development tasks
+install = "uv pip install -e ."
+install-dev = "uv pip install -e . && uv pip install -e '.[test]'"
+update = "uv lock --upgrade"
+lint = "uv run pylint serial"
+clean = "bash -c 'rm -rf build dist *.egg-info .pytest_cache .coverage htmlcov && find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && find . -type f -name \"*.pyc\" -delete'"

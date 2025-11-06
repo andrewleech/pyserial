@@ -6,6 +6,20 @@ build
 dist
 *.egg-info
 
+# Test and coverage
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov/
+
+# IDEs and editors
 .idea
+.vscode
+
+# Virtual environments
 venv
+.venv
+
+# Misc
 xxx*
+.DS_Store
