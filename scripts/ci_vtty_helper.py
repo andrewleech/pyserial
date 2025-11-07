@@ -105,11 +105,14 @@ def keeper_process(fd1, fd2, ready_fd):
     This prevents the vtty devices from being deallocated and provides
     the other end of the serial port pair for testing.
     """
-    # Redirect stderr to avoid blocking parent's command substitution
-    # Open /dev/null for writing
-    devnull_fd = os.open('/dev/null', os.O_WRONLY)
-    os.dup2(devnull_fd, 2)  # Redirect stderr to /dev/null
-    os.close(devnull_fd)
+    # Close all unnecessary file descriptors to avoid blocking parent
+    # Redirect stdin, stdout, stderr to /dev/null
+    devnull_fd = os.open('/dev/null', os.O_RDWR)
+    os.dup2(devnull_fd, 0)  # stdin
+    os.dup2(devnull_fd, 1)  # stdout
+    os.dup2(devnull_fd, 2)  # stderr
+    if devnull_fd > 2:
+        os.close(devnull_fd)
 
     # Ignore signals so we only exit when parent closes descriptors
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
