@@ -186,19 +186,32 @@ def create_vtty_pair_with_keeper():
             return None
 
         # Start background process to keep descriptors open
+        # Use double-fork to properly daemonize and avoid blocking command substitution
         # Create a pipe for readiness signaling
         ready_read, ready_write = os.pipe()
 
         pid = os.fork()
         if pid == 0:
-            # Child process: keep descriptors open and relay data
+            # First child: intermediate process
             os.close(ready_read)  # Child doesn't need to read
-            keeper_process(fd1, fd2, ready_write)
-            os._exit(0)
+
+            # Second fork to create orphaned grandchild
+            pid2 = os.fork()
+            if pid2 == 0:
+                # Grandchild: the actual keeper process
+                # This process will be reparented to init, fully detached
+                keeper_process(fd1, fd2, ready_write)
+                os._exit(0)
+            else:
+                # First child exits immediately, orphaning the grandchild
+                os._exit(0)
         else:
-            # Parent process: wait for readiness signal from child
+            # Parent process: wait for intermediate child to exit
+            os.waitpid(pid, 0)  # Reap intermediate child
+
+            # Wait for readiness signal from grandchild
             os.close(ready_write)  # Parent doesn't need to write
-            print(f"[VTTY] Started keeper process (PID {pid}), waiting for readiness...", file=sys.stderr)
+            print(f"[VTTY] Started keeper process, waiting for readiness...", file=sys.stderr)
 
             # Wait for child to signal readiness (with timeout)
             try:
@@ -222,7 +235,8 @@ def create_vtty_pair_with_keeper():
 
             print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
             sys.stderr.flush()
-            return (port1, port2, pid)
+            # Return 0 for PID since keeper is orphaned/daemonized
+            return (port1, port2, 0)
 
     except OSError as e:
         print(f"[VTTY] ERROR: OS error: errno={e.errno} ({e.strerror})", file=sys.stderr)
