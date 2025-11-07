@@ -10,8 +10,9 @@ import sys
 import subprocess
 
 # ioctl command for getting the allocated vtty device number
-# From vtty source: #define VTMX_GET_VTTY_NUM _IOR('V', 0, int)
-VTMX_GET_VTTY_NUM = 0x80045600
+# From vtty source: #define VTMX_GET_VTTY_NUM (TIOCGPTN)
+# TIOCGPTN = 0x80045430 on Linux x86_64
+VTMX_GET_VTTY_NUM = 0x80045430
 
 
 def check_prerequisites():
