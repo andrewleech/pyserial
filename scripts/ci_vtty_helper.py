@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Helper script to create and manage vtty virtual serial port pairs for CI testing.
-Allocates two connected vtty devices and exports them for pytest to use.
+Allocates two vtty devices and starts a background process to keep them alive.
 """
 import os
 import fcntl
 import struct
 import sys
 import subprocess
+import signal
+import time
 
 # ioctl command for getting the allocated vtty device number
 # From vtty source: #define VTMX_GET_VTTY_NUM (TIOCGPTN)
@@ -81,10 +83,27 @@ def verify_device_exists(device_num):
     return True
 
 
-def create_vtty_pair():
+def keeper_process(fd1, fd2):
     """
-    Create a pair of connected vtty devices.
-    Returns tuple of (port1_path, port2_path) if successful, None otherwise.
+    Background process that keeps file descriptors open.
+    This prevents the vtty devices from being deallocated.
+    """
+    # Ignore signals so we only exit when parent closes descriptors
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Just sleep indefinitely, keeping descriptors open
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+
+
+def create_vtty_pair_with_keeper():
+    """
+    Create a pair of vtty devices and start a background keeper process.
+    Returns tuple of (port1_path, port2_path, keeper_pid) if successful, None otherwise.
     """
     print("[VTTY] Starting vtty pair creation...", file=sys.stderr)
 
@@ -92,7 +111,8 @@ def create_vtty_pair():
         return None
 
     try:
-        # Open /dev/vtmx twice to allocate two connected virtual devices
+        # Open /dev/vtmx twice to allocate two virtual devices
+        # Opening /dev/vtmx automatically creates the corresponding /dev/ttyV# device
         print("[VTTY] Opening /dev/vtmx (first descriptor)...", file=sys.stderr)
         fd1 = os.open("/dev/vtmx", os.O_RDWR | os.O_NOCTTY)
         print(f"[VTTY] Opened fd1: {fd1}", file=sys.stderr)
@@ -101,7 +121,7 @@ def create_vtty_pair():
         fd2 = os.open("/dev/vtmx", os.O_RDWR | os.O_NOCTTY)
         print(f"[VTTY] Opened fd2: {fd2}", file=sys.stderr)
 
-        # Get the device numbers
+        # Get the device numbers allocated by the kernel
         num1 = get_vtty_device_number(fd1, 1)
         num2 = get_vtty_device_number(fd2, 2)
 
@@ -111,26 +131,31 @@ def create_vtty_pair():
             os.close(fd2)
             return None
 
-        print(f"[VTTY] Connecting fd1 (device {num1}) to fd2 (device {num2})...", file=sys.stderr)
-        # Write each device number to the other to establish connection
-        # Format: tag byte (0xFF) followed by port number (single byte)
-        os.write(fd1, struct.pack('BB', 0xFF, num2))
-        os.write(fd2, struct.pack('BB', 0xFF, num1))
-        print("[VTTY] Connection established", file=sys.stderr)
-
-        os.close(fd1)
-        os.close(fd2)
-
         port1 = f"/dev/ttyV{num1}"
         port2 = f"/dev/ttyV{num2}"
+
+        print(f"[VTTY] Allocated devices: {port1} and {port2}", file=sys.stderr)
 
         # Verify devices are accessible
         if not verify_device_exists(num1) or not verify_device_exists(num2):
             print(f"[VTTY] ERROR: Devices created but not accessible", file=sys.stderr)
+            os.close(fd1)
+            os.close(fd2)
             return None
 
-        print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
-        return (port1, port2)
+        # Start background process to keep descriptors open
+        # Fork and let parent exit while child keeps descriptors
+        pid = os.fork()
+        if pid == 0:
+            # Child process: keep descriptors open
+            keeper_process(fd1, fd2)
+            os._exit(0)
+        else:
+            # Parent process: close our copies and exit, child keeps them open
+            # Don't actually close - let child keep them via fork's descriptor inheritance
+            print(f"[VTTY] Started keeper process (PID {pid}) to maintain device allocation", file=sys.stderr)
+            print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
+            return (port1, port2, pid)
 
     except OSError as e:
         print(f"[VTTY] ERROR: OS error: errno={e.errno} ({e.strerror})", file=sys.stderr)
@@ -143,17 +168,18 @@ def create_vtty_pair():
 
 def main():
     """Create vtty pair and output environment variables for use in shell."""
-    result = create_vtty_pair()
+    result = create_vtty_pair_with_keeper()
 
     if result is None:
         print("[VTTY] FATAL: Failed to create vtty pair - aborting", file=sys.stderr)
         sys.exit(1)
 
-    port1, port2 = result
+    port1, port2, keeper_pid = result
 
     # Output bash-compatible export statements
     print(f"export PYSERIAL_PORT={port1}")
     print(f"export PYSERIAL_PORT_PAIR={port2}")
+    print(f"export VTTY_KEEPER_PID={keeper_pid}")
 
 
 if __name__ == "__main__":
