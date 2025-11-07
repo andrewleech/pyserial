@@ -128,11 +128,11 @@ jobs:
           python3 -m pytest --version
           python3 -c "import serial; print(f'pyserial version: {serial.VERSION}')"
 
-      - name: Create vtty helper script
-        if: steps.kernel-headers.outputs.available == 'true'
-        run: |
-          mkdir -p ci
-          cp scripts/ci_vtty_helper.py ci/
+      #- name: Create vtty helper script
+      #  if: steps.kernel-headers.outputs.available == 'true'
+      #  run: |
+      #    mkdir -p ci
+      #    cp scripts/ci_vtty_helper.py ci/
 
       - name: Set up vtty device permissions with udev
         if: steps.kernel-headers.outputs.available == 'true'
@@ -167,6 +167,9 @@ jobs:
             exit 1
           fi
           echo "=== Running pytest with vtty devices ==="
+          echo "Hardware tests should now run (not skipped):"
+          pytest test/test_hardware.py -v
+          echo "=== Running full test suite with coverage ==="
           pytest -v --cov=serial --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
