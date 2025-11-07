@@ -166,10 +166,7 @@ jobs:
             echo "ERROR: Environment variables not set properly"
             exit 1
           fi
-          echo "=== Running pytest with vtty devices ==="
-          echo "Hardware tests should now run (not skipped):"
-          pytest test/test_hardware.py -v
-          echo "=== Running full test suite with coverage ==="
+          echo "=== Running pytest with vtty devices (includes hardware tests) ==="
           pytest -v --cov=serial --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
