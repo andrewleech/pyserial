@@ -29,6 +29,8 @@ import unittest
 import time
 import serial
 import sys
+import os
+import pytest
 
 # Default port - will be overridden by conftest.py
 PORT = 'loop://'
@@ -36,9 +38,19 @@ PORT = 'loop://'
 
 def is_hardware_port():
     """Check if we're using a real hardware port or vtty, not loop://"""
-    return not PORT.startswith('loop://')
+    # Check environment variable first (set by CI), then module-level PORT
+    port = os.environ.get('PYSERIAL_PORT', PORT)
+    return not port.startswith('loop://')
 
 
+# Use pytest.mark.skipif which evaluates at collection time
+pytestmark = pytest.mark.skipif(
+    os.environ.get('PYSERIAL_PORT', 'loop://').startswith('loop://'),
+    reason="Requires real hardware or vtty (not loop://)"
+)
+
+
+# Keep the unittest decorator for backwards compatibility when run standalone
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
 class Test_HardwareFlowControl(unittest.TestCase):
     """Test that hardware flow control actually works"""
