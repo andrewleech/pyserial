@@ -93,6 +93,7 @@ class Test_HardwareFlowControl(unittest.TestCase):
     def tearDown(self):
         self.s.close()
 
+    @unittest.skip("vtty modem lines require master-side ioctl, not yet implemented in keeper")
     def test_rtscts_flow_control(self):
         """Test that RTS/CTS flow control actually stops transmission"""
         # This test uses a single port in loopback mode
