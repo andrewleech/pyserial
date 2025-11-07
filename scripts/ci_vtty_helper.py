@@ -10,6 +10,7 @@ import sys
 import subprocess
 import signal
 import time
+import select
 
 # ioctl command for getting the allocated vtty device number
 # From vtty source: #define VTMX_GET_VTTY_NUM (TIOCGPTN)
@@ -97,20 +98,26 @@ def verify_device_exists(device_num, timeout=5):
     return False
 
 
-def keeper_process(fd1, fd2):
+def keeper_process(fd1, fd2, ready_fd):
     """
     Background process that keeps file descriptors open and relays data
     between them to emulate null-modem behavior.
     This prevents the vtty devices from being deallocated and provides
     the other end of the serial port pair for testing.
     """
-    import select
-
     # Ignore signals so we only exit when parent closes descriptors
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     print("[VTTY] Keeper process started, relaying data between devices", file=sys.stderr)
+
+    # Signal parent that keeper process is ready
+    try:
+        os.write(ready_fd, b"READY\n")
+        os.close(ready_fd)
+        print("[VTTY] Sent readiness signal to parent", file=sys.stderr)
+    except OSError as e:
+        print(f"[VTTY] WARNING: Could not send readiness signal: {e}", file=sys.stderr)
 
     try:
         while True:
@@ -178,16 +185,36 @@ def create_vtty_pair_with_keeper():
             return None
 
         # Start background process to keep descriptors open
-        # Fork and let parent exit while child keeps descriptors
+        # Create a pipe for readiness signaling
+        ready_read, ready_write = os.pipe()
+
         pid = os.fork()
         if pid == 0:
-            # Child process: keep descriptors open
-            keeper_process(fd1, fd2)
+            # Child process: keep descriptors open and relay data
+            os.close(ready_read)  # Child doesn't need to read
+            keeper_process(fd1, fd2, ready_write)
             os._exit(0)
         else:
-            # Parent process: close our copies and exit, child keeps them open
-            # Don't actually close - let child keep them via fork's descriptor inheritance
-            print(f"[VTTY] Started keeper process (PID {pid}) to maintain device allocation", file=sys.stderr)
+            # Parent process: wait for readiness signal from child
+            os.close(ready_write)  # Parent doesn't need to write
+            print(f"[VTTY] Started keeper process (PID {pid}), waiting for readiness...", file=sys.stderr)
+
+            # Wait for child to signal readiness (with timeout)
+            try:
+                ready_list, _, _ = select.select([ready_read], [], [], 5.0)
+                if ready_list:
+                    signal = os.read(ready_read, 1024)
+                    if b"READY" in signal:
+                        print(f"[VTTY] Keeper process ready", file=sys.stderr)
+                    else:
+                        print(f"[VTTY] WARNING: Unexpected signal from keeper: {signal}", file=sys.stderr)
+                else:
+                    print(f"[VTTY] WARNING: Keeper process did not signal readiness within 5s", file=sys.stderr)
+            except Exception as e:
+                print(f"[VTTY] WARNING: Error waiting for readiness: {e}", file=sys.stderr)
+            finally:
+                os.close(ready_read)
+
             print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
             return (port1, port2, pid)
 
