@@ -105,18 +105,30 @@ jobs:
       - name: Build vtty module
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
+          echo "=== Cloning vtty repository ==="
           git clone https://github.com/anszom/vtty.git vtty-module
           cd vtty-module
+          echo "=== Building vtty module ==="
           make
+          echo "=== Loading vtty kernel module ==="
           sudo insmod vtty.ko
+          echo "=== Setting permissions on /dev/vtmx ==="
           sudo chmod 666 /dev/vtmx
-          lsmod | grep vtty
+          echo "=== Verifying module loaded ==="
+          lsmod | grep -A2 vtty
+          echo "=== Verifying /dev/vtmx device exists ==="
+          ls -la /dev/vtmx
 
       - name: Install test dependencies
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
+          echo "=== Installing pyserial ==="
           uv pip install --system -e .
+          echo "=== Installing test dependencies ==="
           uv pip install --system pytest pytest-cov
+          echo "=== Verifying installations ==="
+          python3 -m pytest --version
+          python3 -c "import serial; print(f'pyserial version: {serial.VERSION}')"
 
       - name: Create vtty helper script
         if: steps.kernel-headers.outputs.available == 'true'
@@ -127,7 +139,25 @@ jobs:
       - name: Run tests with vtty
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
-          eval $(python3 scripts/ci_vtty_helper.py)
+          set -e
+          echo "=== Creating vtty virtual serial port pair ==="
+          VTTY_ENV=$(python3 scripts/ci_vtty_helper.py)
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to create vtty pair"
+            exit 1
+          fi
+          echo "=== Helper script output ==="
+          echo "$VTTY_ENV"
+          echo "=== Evaluating environment variables ==="
+          eval "$VTTY_ENV"
+          echo "=== Verifying environment ==="
+          echo "PYSERIAL_PORT=${PYSERIAL_PORT}"
+          echo "PYSERIAL_PORT_PAIR=${PYSERIAL_PORT_PAIR}"
+          if [ -z "$PYSERIAL_PORT" ] || [ -z "$PYSERIAL_PORT_PAIR" ]; then
+            echo "ERROR: Environment variables not set properly"
+            exit 1
+          fi
+          echo "=== Running pytest with vtty devices ==="
           pytest -v --cov=serial --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov

@@ -7,30 +7,76 @@ import os
 import fcntl
 import struct
 import sys
+import subprocess
 
 # ioctl command for getting the allocated vtty device number
 # From vtty source: #define VTMX_GET_VTTY_NUM _IOR('V', 0, int)
 VTMX_GET_VTTY_NUM = 0x80045600
 
 
-def get_vtty_device_number(fd):
+def check_prerequisites():
+    """Check that vtty module is loaded and /dev/vtmx exists."""
+    print("[VTTY] Checking prerequisites...", file=sys.stderr)
+
+    # Check if module is loaded
+    try:
+        result = subprocess.run(['lsmod'], capture_output=True, text=True, check=True)
+        if 'vtty' not in result.stdout:
+            print("[VTTY] ERROR: vtty module not loaded", file=sys.stderr)
+            return False
+        print("[VTTY] Module loaded: OK", file=sys.stderr)
+    except subprocess.CalledProcessError as e:
+        print(f"[VTTY] ERROR: Failed to check lsmod: {e}", file=sys.stderr)
+        return False
+
+    # Check /dev/vtmx exists
+    if not os.path.exists("/dev/vtmx"):
+        print("[VTTY] ERROR: /dev/vtmx does not exist", file=sys.stderr)
+        return False
+    print("[VTTY] /dev/vtmx exists: OK", file=sys.stderr)
+
+    # Check permissions
+    if not os.access("/dev/vtmx", os.R_OK | os.W_OK):
+        print("[VTTY] ERROR: /dev/vtmx not readable/writable", file=sys.stderr)
+        return False
+    print("[VTTY] /dev/vtmx permissions: OK", file=sys.stderr)
+
+    return True
+
+
+def get_vtty_device_number(fd, fd_num):
     """Get the device number for an open /dev/vtmx file descriptor."""
     try:
+        print(f"[VTTY] Calling ioctl for fd{fd_num} (ioctl=0x{VTMX_GET_VTTY_NUM:08x})...", file=sys.stderr)
         buf = struct.pack('i', 0)
         result = fcntl.ioctl(fd, VTMX_GET_VTTY_NUM, buf)
-        return struct.unpack('i', result)[0]
+        device_num = struct.unpack('i', result)[0]
+        print(f"[VTTY] fd{fd_num} allocated device number: {device_num}", file=sys.stderr)
+        return device_num
     except OSError as e:
-        print(f"ERROR: Failed to get vtty device number: {e}", file=sys.stderr)
+        print(f"[VTTY] ERROR: ioctl failed on fd{fd_num}: errno={e.errno} ({e.strerror})", file=sys.stderr)
+        print(f"[VTTY] Details: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[VTTY] ERROR: Unexpected error on fd{fd_num}: {e}", file=sys.stderr)
         return None
 
 
 def verify_device_exists(device_num):
     """Verify that /dev/ttyV<N> device node exists and is accessible."""
     device_path = f"/dev/ttyV{device_num}"
+    print(f"[VTTY] Verifying device {device_path}...", file=sys.stderr)
+
     if not os.path.exists(device_path):
+        print(f"[VTTY] ERROR: Device node {device_path} does not exist", file=sys.stderr)
         return False
+    print(f"[VTTY] Device node exists: OK", file=sys.stderr)
+
     if not os.access(device_path, os.R_OK | os.W_OK):
+        print(f"[VTTY] ERROR: Device {device_path} not readable/writable", file=sys.stderr)
         return False
+    print(f"[VTTY] Device permissions: OK", file=sys.stderr)
+
     return True
 
 
@@ -39,24 +85,37 @@ def create_vtty_pair():
     Create a pair of connected vtty devices.
     Returns tuple of (port1_path, port2_path) if successful, None otherwise.
     """
+    print("[VTTY] Starting vtty pair creation...", file=sys.stderr)
+
+    if not check_prerequisites():
+        return None
+
     try:
         # Open /dev/vtmx twice to allocate two connected virtual devices
+        print("[VTTY] Opening /dev/vtmx (first descriptor)...", file=sys.stderr)
         fd1 = os.open("/dev/vtmx", os.O_RDWR | os.O_NOCTTY)
+        print(f"[VTTY] Opened fd1: {fd1}", file=sys.stderr)
+
+        print("[VTTY] Opening /dev/vtmx (second descriptor)...", file=sys.stderr)
         fd2 = os.open("/dev/vtmx", os.O_RDWR | os.O_NOCTTY)
+        print(f"[VTTY] Opened fd2: {fd2}", file=sys.stderr)
 
         # Get the device numbers
-        num1 = get_vtty_device_number(fd1)
-        num2 = get_vtty_device_number(fd2)
+        num1 = get_vtty_device_number(fd1, 1)
+        num2 = get_vtty_device_number(fd2, 2)
 
         if num1 is None or num2 is None:
+            print("[VTTY] ERROR: Failed to get device numbers", file=sys.stderr)
             os.close(fd1)
             os.close(fd2)
             return None
 
+        print(f"[VTTY] Connecting fd1 (device {num1}) to fd2 (device {num2})...", file=sys.stderr)
         # Write each device number to the other to establish connection
         # Format: tag byte (0xFF) followed by port number (single byte)
         os.write(fd1, struct.pack('BB', 0xFF, num2))
         os.write(fd2, struct.pack('BB', 0xFF, num1))
+        print("[VTTY] Connection established", file=sys.stderr)
 
         os.close(fd1)
         os.close(fd2)
@@ -66,13 +125,18 @@ def create_vtty_pair():
 
         # Verify devices are accessible
         if not verify_device_exists(num1) or not verify_device_exists(num2):
-            print(f"ERROR: Created devices but cannot access them", file=sys.stderr)
+            print(f"[VTTY] ERROR: Devices created but not accessible", file=sys.stderr)
             return None
 
+        print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
         return (port1, port2)
 
     except OSError as e:
-        print(f"ERROR: Failed to create vtty pair: {e}", file=sys.stderr)
+        print(f"[VTTY] ERROR: OS error: errno={e.errno} ({e.strerror})", file=sys.stderr)
+        print(f"[VTTY] Details: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[VTTY] ERROR: Unexpected error: {e}", file=sys.stderr)
         return None
 
 
@@ -81,7 +145,7 @@ def main():
     result = create_vtty_pair()
 
     if result is None:
-        print("ERROR: Failed to create vtty pair", file=sys.stderr)
+        print("[VTTY] FATAL: Failed to create vtty pair - aborting", file=sys.stderr)
         sys.exit(1)
 
     port1, port2 = result
@@ -89,9 +153,6 @@ def main():
     # Output bash-compatible export statements
     print(f"export PYSERIAL_PORT={port1}")
     print(f"export PYSERIAL_PORT_PAIR={port2}")
-
-    # Also output for debugging
-    print(f"echo 'Created vtty pair: {port1} <-> {port2}' >&2", file=sys.stderr)
 
 
 if __name__ == "__main__":
