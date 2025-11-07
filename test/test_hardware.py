@@ -36,11 +36,15 @@ import pytest
 PORT = 'loop://'
 
 
+def get_port():
+    """Get the actual port to use for testing"""
+    # Check environment variable first (set by CI), then module-level PORT
+    return os.environ.get('PYSERIAL_PORT', PORT)
+
+
 def is_hardware_port():
     """Check if we're using a real hardware port or vtty, not loop://"""
-    # Check environment variable first (set by CI), then module-level PORT
-    port = os.environ.get('PYSERIAL_PORT', PORT)
-    return not port.startswith('loop://')
+    return not get_port().startswith('loop://')
 
 
 # Use pytest.mark.skipif which evaluates at collection time
@@ -56,7 +60,7 @@ class Test_HardwareFlowControl(unittest.TestCase):
     """Test that hardware flow control actually works"""
 
     def setUp(self):
-        self.s = serial.Serial(PORT, baudrate=115200, timeout=1, write_timeout=1)
+        self.s = serial.Serial(get_port(), baudrate=115200, timeout=1, write_timeout=1)
 
     def tearDown(self):
         self.s.close()
@@ -107,7 +111,7 @@ class Test_ParityValidation(unittest.TestCase):
         """Test that even parity works correctly"""
         # Open two instances of the same port with loopback
         # Both should use same parity for data integrity
-        s1 = serial.Serial(PORT, baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
 
         try:
             # With matching parity, data should pass through correctly
@@ -124,7 +128,7 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
-        s1 = serial.Serial(PORT, baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
+        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
 
         try:
             # With matching parity, data should pass through correctly
@@ -141,7 +145,7 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_none(self):
         """Test that no parity works correctly"""
-        s1 = serial.Serial(PORT, baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
+        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
 
         try:
             # With no parity, all 8 bits should pass through
@@ -163,7 +167,7 @@ class Test_ByteSize(unittest.TestCase):
 
     def test_bytesize_7(self):
         """Test 7-bit character size masks high bit"""
-        s1 = serial.Serial(PORT, baudrate=9600, bytesize=serial.SEVENBITS,
+        s1 = serial.Serial(get_port(), baudrate=9600, bytesize=serial.SEVENBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
@@ -184,7 +188,7 @@ class Test_ByteSize(unittest.TestCase):
 
     def test_bytesize_8(self):
         """Test 8-bit character size preserves all bits"""
-        s1 = serial.Serial(PORT, baudrate=9600, bytesize=serial.EIGHTBITS,
+        s1 = serial.Serial(get_port(), baudrate=9600, bytesize=serial.EIGHTBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
@@ -210,7 +214,7 @@ class Test_BaudRate(unittest.TestCase):
         test_data = b'X' * 100
 
         # Test at 9600 baud
-        s_slow = serial.Serial(PORT, baudrate=9600, timeout=5)
+        s_slow = serial.Serial(get_port(), baudrate=9600, timeout=5)
         start = time.time()
         s_slow.write(test_data)
         s_slow.flush()  # Wait for transmission to complete
@@ -218,7 +222,7 @@ class Test_BaudRate(unittest.TestCase):
         s_slow.close()
 
         # Test at 115200 baud
-        s_fast = serial.Serial(PORT, baudrate=115200, timeout=5)
+        s_fast = serial.Serial(get_port(), baudrate=115200, timeout=5)
         start = time.time()
         s_fast.write(test_data)
         s_fast.flush()  # Wait for transmission to complete
@@ -237,7 +241,7 @@ class Test_BaudRate(unittest.TestCase):
 
         for baud in standard_bauds:
             with self.subTest(baudrate=baud):
-                s = serial.Serial(PORT, baudrate=baud, timeout=1)
+                s = serial.Serial(get_port(), baudrate=baud, timeout=1)
                 try:
                     # Verify we can send and receive at this baud rate
                     s.write(test_data)
@@ -256,7 +260,7 @@ class Test_StopBits(unittest.TestCase):
 
     def test_stopbits_one(self):
         """Test 1 stop bit configuration"""
-        s = serial.Serial(PORT, baudrate=9600, stopbits=serial.STOPBITS_ONE, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, stopbits=serial.STOPBITS_ONE, timeout=1)
         try:
             test_data = b'test with 1 stop bit'
             s.write(test_data)
@@ -270,7 +274,7 @@ class Test_StopBits(unittest.TestCase):
 
     def test_stopbits_two(self):
         """Test 2 stop bits configuration"""
-        s = serial.Serial(PORT, baudrate=9600, stopbits=serial.STOPBITS_TWO, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, stopbits=serial.STOPBITS_TWO, timeout=1)
         try:
             test_data = b'test with 2 stop bits'
             s.write(test_data)
@@ -304,7 +308,7 @@ class Test_MixedSettings(unittest.TestCase):
 
         for baud, bits, parity, stop in configs:
             with self.subTest(baudrate=baud, bytesize=bits, parity=parity, stopbits=stop):
-                s = serial.Serial(PORT, baudrate=baud, bytesize=bits,
+                s = serial.Serial(get_port(), baudrate=baud, bytesize=bits,
                                 parity=parity, stopbits=stop, timeout=1)
                 try:
                     s.write(test_data)
@@ -332,7 +336,7 @@ class Test_BreakSignal(unittest.TestCase):
 
     def test_send_break(self):
         """Test that send_break() can be called without error"""
-        s = serial.Serial(PORT, baudrate=9600, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, timeout=1)
         try:
             # Send a break signal
             # Duration is platform-specific, typically 0.25-0.5 seconds
@@ -350,6 +354,7 @@ if __name__ == '__main__':
     sys.stdout.write(__doc__)
     if len(sys.argv) > 1:
         PORT = sys.argv[1]
-    sys.stdout.write(f"Testing on port: {PORT}\n")
+    port = get_port()
+    sys.stdout.write(f"Testing on port: {port}\n")
     sys.argv[1:] = ['-v']
     unittest.main()
