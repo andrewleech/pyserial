@@ -78,19 +78,12 @@ def verify_device_exists(device_num, timeout=5):
         if os.path.exists(device_path):
             print(f"[VTTY] Device node exists: OK", file=sys.stderr)
 
-            # Try to chmod it in case it's owned by root
-            try:
-                os.chmod(device_path, 0o666)
-                print(f"[VTTY] Device permissions set to 666: OK", file=sys.stderr)
-            except OSError as e:
-                print(f"[VTTY] WARNING: Could not chmod {device_path}: {e}", file=sys.stderr)
-
-            # Check if now readable/writable
+            # Check if now readable/writable (permissions should be set by udev rule)
             if os.access(device_path, os.R_OK | os.W_OK):
                 print(f"[VTTY] Device permissions verified: OK", file=sys.stderr)
                 return True
             else:
-                print(f"[VTTY] Device exists but not readable/writable, retrying...", file=sys.stderr)
+                print(f"[VTTY] Device exists but not readable/writable yet, retrying...", file=sys.stderr)
                 time.sleep(0.1)
                 continue
 

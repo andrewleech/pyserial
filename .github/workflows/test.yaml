@@ -134,6 +134,14 @@ jobs:
           mkdir -p ci
           cp scripts/ci_vtty_helper.py ci/
 
+      - name: Set up vtty device permissions with udev
+        if: steps.kernel-headers.outputs.available == 'true'
+        run: |
+          echo "=== Installing udev rule for vtty devices ==="
+          echo 'KERNEL=="ttyV*", MODE="0666"' | sudo tee /etc/udev/rules.d/99-vtty.rules
+          sudo udevadm control --reload-rules
+          echo "=== udev rule installed ==="
+
       - name: Run tests with vtty
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
