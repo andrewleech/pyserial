@@ -42,6 +42,34 @@ def get_port():
     return os.environ.get('PYSERIAL_PORT', PORT)
 
 
+def get_port_pair():
+    """Get the paired port for loopback testing (vtty only)"""
+    # vtty provides two separate devices that are cross-connected
+    return os.environ.get('PYSERIAL_PORT_PAIR', None)
+
+
+def open_loopback_pair(**kwargs):
+    """
+    Open both ports in a loopback pair for testing.
+
+    For vtty: opens /dev/ttyV0 and /dev/ttyV1 (cross-connected)
+    For real hardware: opens same port twice (assumes external loopback)
+
+    Returns (tx_port, rx_port) tuple.
+    """
+    port1 = get_port()
+    port2 = get_port_pair()
+
+    if port2:
+        # vtty or paired ports - open both
+        return serial.Serial(port1, **kwargs), serial.Serial(port2, **kwargs)
+    else:
+        # Real hardware with external loopback - open same port twice
+        # (or just once and use for both tx/rx)
+        s = serial.Serial(port1, **kwargs)
+        return s, s
+
+
 def is_hardware_port():
     """Check if we're using a real hardware port or vtty, not loop://"""
     return not get_port().startswith('loop://')
@@ -109,56 +137,63 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_even(self):
         """Test that even parity works correctly"""
-        # Open two instances of the same port with loopback
-        # Both should use same parity for data integrity
-        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
 
         try:
-            # With matching parity, data should pass through correctly
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s1.write(test_data)
-            s1.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s1.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            s1.close()
+            if s_tx != s_rx:
+                s_tx.close()
+                s_rx.close()
+            else:
+                s_tx.close()
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
-        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
+        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
 
         try:
-            # With matching parity, data should pass through correctly
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s1.write(test_data)
-            s1.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s1.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            s1.close()
+            if s_tx != s_rx:
+                s_tx.close()
+                s_rx.close()
+            else:
+                s_tx.close()
 
     def test_parity_none(self):
         """Test that no parity works correctly"""
-        s1 = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
+        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
 
         try:
-            # With no parity, all 8 bits should pass through
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s1.write(test_data)
-            s1.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s1.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with no parity")
         finally:
-            s1.close()
+            if s_tx != s_rx:
+                s_tx.close()
+                s_rx.close()
+            else:
+                s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
@@ -167,42 +202,50 @@ class Test_ByteSize(unittest.TestCase):
 
     def test_bytesize_7(self):
         """Test 7-bit character size masks high bit"""
-        s1 = serial.Serial(get_port(), baudrate=9600, bytesize=serial.SEVENBITS,
+        s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.SEVENBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
             # With 7 bits, high bit should be masked off
             # Send 0xFF (11111111), should receive 0x7F (01111111)
             test_data = b'\xFF\xAA\x80'
-            s1.write(test_data)
-            s1.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s1.read(len(test_data))
+            received = s_rx.read(len(test_data))
             # High bit should be masked in 7-bit mode
             expected = bytes([b & 0x7F for b in test_data])
             self.assertEqual(received, expected,
                            "High bit should be masked in 7-bit mode")
         finally:
-            s1.close()
+            if s_tx != s_rx:
+                s_tx.close()
+                s_rx.close()
+            else:
+                s_tx.close()
 
     def test_bytesize_8(self):
         """Test 8-bit character size preserves all bits"""
-        s1 = serial.Serial(get_port(), baudrate=9600, bytesize=serial.EIGHTBITS,
+        s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.EIGHTBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
             # With 8 bits, all bits should pass through
             test_data = b'\xFF\xAA\x80\x00\x7F'
-            s1.write(test_data)
-            s1.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s1.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "All 8 bits should pass through in 8-bit mode")
         finally:
-            s1.close()
+            if s_tx != s_rx:
+                s_tx.close()
+                s_rx.close()
+            else:
+                s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
