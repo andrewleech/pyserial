@@ -201,6 +201,7 @@ def create_vtty_pair_with_keeper():
 
             # Wait for child to signal readiness (with timeout)
             try:
+                print(f"[VTTY] Parent waiting for keeper readiness signal (max 5s)...", file=sys.stderr)
                 ready_list, _, _ = select.select([ready_read], [], [], 5.0)
                 if ready_list:
                     signal = os.read(ready_read, 1024)
@@ -213,9 +214,13 @@ def create_vtty_pair_with_keeper():
             except Exception as e:
                 print(f"[VTTY] WARNING: Error waiting for readiness: {e}", file=sys.stderr)
             finally:
-                os.close(ready_read)
+                try:
+                    os.close(ready_read)
+                except:
+                    pass
 
             print(f"[VTTY] SUCCESS: Created vtty pair {port1} <-> {port2}", file=sys.stderr)
+            sys.stderr.flush()
             return (port1, port2, pid)
 
     except OSError as e:
@@ -233,6 +238,7 @@ def main():
 
     if result is None:
         print("[VTTY] FATAL: Failed to create vtty pair - aborting", file=sys.stderr)
+        sys.stderr.flush()
         sys.exit(1)
 
     port1, port2, keeper_pid = result
@@ -241,6 +247,10 @@ def main():
     print(f"export PYSERIAL_PORT={port1}")
     print(f"export PYSERIAL_PORT_PAIR={port2}")
     print(f"export VTTY_KEEPER_PID={keeper_pid}")
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    print("[VTTY] Environment variables exported successfully", file=sys.stderr)
 
 
 if __name__ == "__main__":

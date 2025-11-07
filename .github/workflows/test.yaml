@@ -147,18 +147,22 @@ jobs:
         run: |
           set -e
           echo "=== Creating vtty virtual serial port pair ==="
-          VTTY_ENV=$(python3 scripts/ci_vtty_helper.py)
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to create vtty pair"
+          VTTY_ENV=$(python3 scripts/ci_vtty_helper.py 2>&1)
+          VTTY_EXIT=$?
+          echo "=== Script exit code: $VTTY_EXIT ==="
+          echo "=== Helper script output (raw) ==="
+          echo "$VTTY_ENV"
+          echo "=== End of output ==="
+          if [ $VTTY_EXIT -ne 0 ]; then
+            echo "ERROR: Failed to create vtty pair (exit code: $VTTY_EXIT)"
             exit 1
           fi
-          echo "=== Helper script output ==="
-          echo "$VTTY_ENV"
           echo "=== Evaluating environment variables ==="
           eval "$VTTY_ENV"
           echo "=== Verifying environment ==="
           echo "PYSERIAL_PORT=${PYSERIAL_PORT}"
           echo "PYSERIAL_PORT_PAIR=${PYSERIAL_PORT_PAIR}"
+          echo "VTTY_KEEPER_PID=${VTTY_KEEPER_PID}"
           if [ -z "$PYSERIAL_PORT" ] || [ -z "$PYSERIAL_PORT_PAIR" ]; then
             echo "ERROR: Environment variables not set properly"
             exit 1
