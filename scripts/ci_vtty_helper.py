@@ -65,22 +65,43 @@ def get_vtty_device_number(fd, fd_num):
         return None
 
 
-def verify_device_exists(device_num):
-    """Verify that /dev/ttyV<N> device node exists and is accessible."""
+def verify_device_exists(device_num, timeout=5):
+    """
+    Verify that /dev/ttyV<N> device node exists and is accessible.
+    Retries for up to timeout seconds in case device creation is delayed.
+    """
     device_path = f"/dev/ttyV{device_num}"
-    print(f"[VTTY] Verifying device {device_path}...", file=sys.stderr)
+    print(f"[VTTY] Verifying device {device_path} (timeout: {timeout}s)...", file=sys.stderr)
 
-    if not os.path.exists(device_path):
-        print(f"[VTTY] ERROR: Device node {device_path} does not exist", file=sys.stderr)
-        return False
-    print(f"[VTTY] Device node exists: OK", file=sys.stderr)
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if os.path.exists(device_path):
+            print(f"[VTTY] Device node exists: OK", file=sys.stderr)
 
-    if not os.access(device_path, os.R_OK | os.W_OK):
-        print(f"[VTTY] ERROR: Device {device_path} not readable/writable", file=sys.stderr)
-        return False
-    print(f"[VTTY] Device permissions: OK", file=sys.stderr)
+            # Try to chmod it in case it's owned by root
+            try:
+                os.chmod(device_path, 0o666)
+                print(f"[VTTY] Device permissions set to 666: OK", file=sys.stderr)
+            except OSError as e:
+                print(f"[VTTY] WARNING: Could not chmod {device_path}: {e}", file=sys.stderr)
 
-    return True
+            # Check if now readable/writable
+            if os.access(device_path, os.R_OK | os.W_OK):
+                print(f"[VTTY] Device permissions verified: OK", file=sys.stderr)
+                return True
+            else:
+                print(f"[VTTY] Device exists but not readable/writable, retrying...", file=sys.stderr)
+                time.sleep(0.1)
+                continue
+
+        elapsed = time.time() - start_time
+        remaining = timeout - elapsed
+        if remaining > 0:
+            print(f"[VTTY] Device not yet created, retrying... ({remaining:.1f}s remaining)", file=sys.stderr)
+            time.sleep(0.1)
+
+    print(f"[VTTY] ERROR: Device {device_path} failed to become available after {timeout}s", file=sys.stderr)
+    return False
 
 
 def keeper_process(fd1, fd2):
