@@ -168,4 +168,12 @@ jobs:
       - name: Cleanup
         if: always() && steps.kernel-headers.outputs.available == 'true'
         run: |
+          echo "=== Cleaning up vtty resources ==="
+          if [ -n "$VTTY_KEEPER_PID" ]; then
+            echo "Killing keeper process (PID $VTTY_KEEPER_PID)"
+            kill $VTTY_KEEPER_PID 2>/dev/null || true
+            sleep 1
+          fi
+          echo "Unloading vtty module"
           sudo rmmod vtty || true
+          echo "Cleanup complete"
