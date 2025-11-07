@@ -105,19 +105,22 @@ def keeper_process(fd1, fd2, ready_fd):
     This prevents the vtty devices from being deallocated and provides
     the other end of the serial port pair for testing.
     """
+    # Redirect stderr to avoid blocking parent's command substitution
+    # Open /dev/null for writing
+    devnull_fd = os.open('/dev/null', os.O_WRONLY)
+    os.dup2(devnull_fd, 2)  # Redirect stderr to /dev/null
+    os.close(devnull_fd)
+
     # Ignore signals so we only exit when parent closes descriptors
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-    print("[VTTY] Keeper process started, relaying data between devices", file=sys.stderr)
 
     # Signal parent that keeper process is ready
     try:
         os.write(ready_fd, b"READY\n")
         os.close(ready_fd)
-        print("[VTTY] Sent readiness signal to parent", file=sys.stderr)
-    except OSError as e:
-        print(f"[VTTY] WARNING: Could not send readiness signal: {e}", file=sys.stderr)
+    except OSError:
+        pass  # Can't log, stderr is redirected
 
     try:
         while True:
@@ -137,8 +140,6 @@ def keeper_process(fd1, fd2, ready_fd):
                     pass
     except KeyboardInterrupt:
         pass
-    finally:
-        print("[VTTY] Keeper process exiting", file=sys.stderr)
 
 
 def create_vtty_pair_with_keeper():
