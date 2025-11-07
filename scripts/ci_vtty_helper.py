@@ -99,19 +99,39 @@ def verify_device_exists(device_num, timeout=5):
 
 def keeper_process(fd1, fd2):
     """
-    Background process that keeps file descriptors open.
-    This prevents the vtty devices from being deallocated.
+    Background process that keeps file descriptors open and relays data
+    between them to emulate null-modem behavior.
+    This prevents the vtty devices from being deallocated and provides
+    the other end of the serial port pair for testing.
     """
+    import select
+
     # Ignore signals so we only exit when parent closes descriptors
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-    # Just sleep indefinitely, keeping descriptors open
+    print("[VTTY] Keeper process started, relaying data between devices", file=sys.stderr)
+
     try:
         while True:
-            time.sleep(1)
+            # Use select to wait for data on either file descriptor
+            ready, _, _ = select.select([fd1, fd2], [], [], 1.0)
+
+            for fd in ready:
+                try:
+                    # Read data from one side
+                    data = os.read(fd, 4096)
+                    if data:
+                        # Write to the other side
+                        other_fd = fd2 if fd == fd1 else fd1
+                        os.write(other_fd, data)
+                except OSError:
+                    # Handle device errors gracefully
+                    pass
     except KeyboardInterrupt:
         pass
+    finally:
+        print("[VTTY] Keeper process exiting", file=sys.stderr)
 
 
 def create_vtty_pair_with_keeper():
