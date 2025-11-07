@@ -12,10 +12,26 @@ import signal
 import time
 import select
 
-# ioctl command for getting the allocated vtty device number
+# ioctl commands for vtty
 # From vtty source: #define VTMX_GET_VTTY_NUM (TIOCGPTN)
 # TIOCGPTN = 0x80045430 on Linux x86_64
 VTMX_GET_VTTY_NUM = 0x80045430
+
+# From vtty source: #define VTMX_SET_MODEM_LINES (TIOCMSET)
+# TIOCMSET = 0x5418 on Linux x86_64
+VTMX_SET_MODEM_LINES = 0x5418
+
+# Packet tags from vtty
+TAG_UART_RX = 0
+TAG_SET_TERMIOS = 1
+TAG_SET_MODEM = 2
+TAG_BREAK_CTL = 3
+
+# Modem line bits (from termios.h)
+TIOCM_DTR = 0x002
+TIOCM_RTS = 0x004
+TIOCM_CTS = 0x020
+TIOCM_DSR = 0x100
 
 
 def check_prerequisites():
@@ -134,10 +150,66 @@ def keeper_process(fd1, fd2, ready_fd):
                 try:
                     # Read data from one side
                     data = os.read(fd, 4096)
-                    if data:
-                        # Write to the other side
-                        other_fd = fd2 if fd == fd1 else fd1
-                        os.write(other_fd, data)
+                    if not data:
+                        continue
+
+                    other_fd = fd2 if fd == fd1 else fd1
+
+                    # Parse vtty packets
+                    offset = 0
+                    while offset < len(data):
+                        tag = data[offset]
+
+                        if tag == TAG_UART_RX:
+                            # Serial data - find the packet boundary
+                            # Data continues until next tag or end
+                            packet_end = offset + 1
+                            while packet_end < len(data) and data[packet_end] not in [TAG_UART_RX, TAG_SET_TERMIOS, TAG_SET_MODEM, TAG_BREAK_CTL]:
+                                packet_end += 1
+                            # Write the data (excluding tag) to other side
+                            os.write(other_fd, data[offset+1:packet_end])
+                            offset = packet_end
+
+                        elif tag == TAG_SET_MODEM:
+                            # Modem line change - emulate null-modem
+                            if offset + 5 <= len(data):
+                                modem_state = struct.unpack('I', data[offset+1:offset+5])[0]
+
+                                # Null-modem mapping: DTR->DSR, RTS->CTS
+                                mapped_state = 0
+                                if modem_state & TIOCM_DTR:
+                                    mapped_state |= TIOCM_DSR
+                                if modem_state & TIOCM_RTS:
+                                    mapped_state |= TIOCM_CTS
+
+                                # Set modem lines on other side via ioctl
+                                try:
+                                    buf = struct.pack('I', mapped_state)
+                                    fcntl.ioctl(other_fd, VTMX_SET_MODEM_LINES, buf)
+                                except OSError:
+                                    pass
+
+                                offset += 5
+                            else:
+                                break  # Incomplete packet
+
+                        elif tag == TAG_SET_TERMIOS:
+                            # Termios change - ignore for now
+                            # struct termios2 is platform-specific size
+                            # Just skip this packet
+                            offset += 1  # Skip tag, we don't relay termios
+
+                        elif tag == TAG_BREAK_CTL:
+                            # Break control - skip for now
+                            if offset + 5 <= len(data):
+                                offset += 5
+                            else:
+                                break
+
+                        else:
+                            # Unknown tag, skip byte
+                            offset += 1
+
                 except OSError:
                     # Handle device errors gracefully
                     pass
