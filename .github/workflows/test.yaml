@@ -104,8 +104,8 @@ jobs:
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
           echo "=== Cloning tty0tty repository ==="
-          git clone https://github.com/freemed/tty0tty.git
-          cd tty0tty/module
+          git clone https://github.com/freemed/tty0tty.git /tmp/tty0tty
+          cd /tmp/tty0tty/module
           echo "=== Building tty0tty module ==="
           make
           echo "=== Loading tty0tty kernel module ==="
