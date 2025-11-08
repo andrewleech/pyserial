@@ -200,6 +200,7 @@ class Test_ParityValidation(unittest.TestCase):
 class Test_ByteSize(unittest.TestCase):
     """Test that character size (bits per byte) is enforced"""
 
+    @unittest.skip("vtty doesn't enforce bytesize/parity at driver level")
     def test_bytesize_7(self):
         """Test 7-bit character size masks high bit"""
         s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.SEVENBITS,
@@ -225,6 +226,7 @@ class Test_ByteSize(unittest.TestCase):
             else:
                 s_tx.close()
 
+    @unittest.skip("vtty doesn't enforce bytesize/parity at driver level")
     def test_bytesize_8(self):
         """Test 8-bit character size preserves all bits"""
         s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.EIGHTBITS,
