@@ -122,10 +122,6 @@ class Test_ParityValidation(unittest.TestCase):
                            "Data should pass correctly with matching parity")
         finally:
             s.close()
-                s_tx.close()
-                s_rx.close()
-            else:
-                s_tx.close()
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
@@ -142,10 +138,6 @@ class Test_ParityValidation(unittest.TestCase):
                            "Data should pass correctly with matching parity")
         finally:
             s.close()
-                s_tx.close()
-                s_rx.close()
-            else:
-                s_tx.close()
 
     def test_parity_none(self):
         """Test that no parity works correctly"""
@@ -162,10 +154,6 @@ class Test_ParityValidation(unittest.TestCase):
                            "Data should pass correctly with no parity")
         finally:
             s.close()
-                s_tx.close()
-                s_rx.close()
-            else:
-                s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
@@ -193,10 +181,6 @@ class Test_ByteSize(unittest.TestCase):
                            "High bit should be masked in 7-bit mode")
         finally:
             s.close()
-                s_tx.close()
-                s_rx.close()
-            else:
-                s_tx.close()
 
     @unittest.skip("tty0tty doesn't enforce bytesize/parity at driver level")
     def test_bytesize_8(self):
@@ -216,10 +200,6 @@ class Test_ByteSize(unittest.TestCase):
                            "All 8 bits should pass through in 8-bit mode")
         finally:
             s.close()
-                s_tx.close()
-                s_rx.close()
-            else:
-                s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
