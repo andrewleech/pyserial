@@ -46,8 +46,8 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
-  test-vtty-linux:
-    name: Test with vtty virtual serial ports
+  test-tty0tty-linux:
+    name: Test with tty0tty null-modem emulator
     runs-on: ubuntu-latest
     continue-on-error: true
 
@@ -100,22 +100,26 @@ jobs:
           echo "WARNING: No matching kernel headers found"
           echo "available=false" >> $GITHUB_OUTPUT
 
-      - name: Build vtty module
+      - name: Build and load tty0tty module
         if: steps.kernel-headers.outputs.available == 'true'
         run: |
-          echo "=== Cloning vtty repository ==="
-          git clone https://github.com/anszom/vtty.git vtty-module
-          cd vtty-module
-          echo "=== Building vtty module ==="
+          echo "=== Cloning tty0tty repository ==="
+          git clone https://github.com/freemed/tty0tty.git
+          cd tty0tty/module
+          echo "=== Building tty0tty module ==="
           make
-          echo "=== Loading vtty kernel module ==="
-          sudo insmod vtty.ko
-          echo "=== Setting permissions on /dev/vtmx ==="
-          sudo chmod 666 /dev/vtmx
+          echo "=== Loading tty0tty kernel module ==="
+          sudo insmod tty0tty.ko
           echo "=== Verifying module loaded ==="
-          lsmod | grep -A2 vtty
-          echo "=== Verifying /dev/vtmx device exists ==="
-          ls -la /dev/vtmx
+          lsmod | grep tty0tty
+          echo "=== Verifying tnt devices exist ==="
+          ls -la /dev/tnt*
+          echo "=== Setting permissions on tnt devices ==="
+          echo 'KERNEL=="tnt[0-9]*", MODE="0666"' | sudo tee /etc/udev/rules.d/99-tty0tty.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger
+          sudo chmod 666 /dev/tnt*
+          ls -la /dev/tnt*
 
       - name: Install test dependencies
         if: steps.kernel-headers.outputs.available == 'true'
@@ -128,45 +132,14 @@ jobs:
           python3 -m pytest --version
           python3 -c "import serial; print(f'pyserial version: {serial.VERSION}')"
 
-      #- name: Create vtty helper script
-      #  if: steps.kernel-headers.outputs.available == 'true'
-      #  run: |
-      #    mkdir -p ci
-      #    cp scripts/ci_vtty_helper.py ci/
-
-      - name: Set up vtty device permissions with udev
+      - name: Run tests with tty0tty
         if: steps.kernel-headers.outputs.available == 'true'
+        env:
+          PYSERIAL_PORT: /dev/tnt0
         run: |
-          echo "=== Installing udev rule for vtty devices ==="
-          echo 'KERNEL=="ttyV*", MODE="0666"' | sudo tee /etc/udev/rules.d/99-vtty.rules
-          sudo udevadm control --reload-rules
-          echo "=== udev rule installed ==="
-
-      - name: Run tests with vtty
-        if: steps.kernel-headers.outputs.available == 'true'
-        run: |
-          set -e
-          echo "=== Creating vtty virtual serial port pair ==="
-          VTTY_ENV=$(python3 scripts/ci_vtty_helper.py)
-          VTTY_EXIT=$?
-          echo "=== Script exit code: $VTTY_EXIT ==="
-          if [ $VTTY_EXIT -ne 0 ]; then
-            echo "ERROR: Failed to create vtty pair (exit code: $VTTY_EXIT)"
-            exit 1
-          fi
-          echo "=== Captured environment exports ==="
-          echo "$VTTY_ENV"
-          echo "=== Evaluating environment variables ==="
-          eval "$VTTY_ENV"
-          echo "=== Verifying environment ==="
-          echo "PYSERIAL_PORT=${PYSERIAL_PORT}"
-          echo "PYSERIAL_PORT_PAIR=${PYSERIAL_PORT_PAIR}"
-          echo "VTTY_KEEPER_PID=${VTTY_KEEPER_PID}"
-          if [ -z "$PYSERIAL_PORT" ] || [ -z "$PYSERIAL_PORT_PAIR" ]; then
-            echo "ERROR: Environment variables not set properly"
-            exit 1
-          fi
-          echo "=== Running pytest with vtty devices (includes hardware tests) ==="
+          echo "=== Testing with tty0tty null-modem devices ==="
+          echo "Using /dev/tnt0 (paired with /dev/tnt1)"
+          echo "Modem lines: RTS->CTS, DTR->DSR/CD automatically connected"
           pytest -v --cov=serial --cov-report=xml --cov-report=term --tb=short
 
       - name: Upload coverage to Codecov
@@ -179,10 +152,6 @@ jobs:
       - name: Cleanup
         if: always() && steps.kernel-headers.outputs.available == 'true'
         run: |
-          echo "=== Cleaning up vtty resources ==="
-          echo "Finding and killing keeper processes"
-          pkill -f "ci_vtty_helper" || true
-          sleep 1
-          echo "Unloading vtty module"
-          sudo rmmod vtty || true
+          echo "=== Cleaning up tty0tty resources ==="
+          sudo rmmod tty0tty || true
           echo "Cleanup complete"

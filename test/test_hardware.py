@@ -7,7 +7,7 @@
 """\
 Hardware-specific tests for serial port functionality.
 
-These tests require actual serial port hardware or kernel-level emulation (like vtty).
+These tests require actual serial port hardware or kernel-level emulation (like tty0tty).
 They will be skipped when using loop:// since it ignores termios settings.
 
 Tests validate:
@@ -42,48 +42,20 @@ def get_port():
     return os.environ.get('PYSERIAL_PORT', PORT)
 
 
-def get_port_pair():
-    """Get the paired port for loopback testing (vtty only)"""
-    # vtty provides two separate devices that are cross-connected
-    return os.environ.get('PYSERIAL_PORT_PAIR', None)
-
-
-def open_loopback_pair(**kwargs):
-    """
-    Open both ports in a loopback pair for testing.
-
-    For vtty: opens /dev/ttyV0 and /dev/ttyV1 (cross-connected)
-    For real hardware: opens same port twice (assumes external loopback)
-
-    Returns (tx_port, rx_port) tuple.
-    """
-    port1 = get_port()
-    port2 = get_port_pair()
-
-    if port2:
-        # vtty or paired ports - open both
-        return serial.Serial(port1, **kwargs), serial.Serial(port2, **kwargs)
-    else:
-        # Real hardware with external loopback - open same port twice
-        # (or just once and use for both tx/rx)
-        s = serial.Serial(port1, **kwargs)
-        return s, s
-
-
 def is_hardware_port():
-    """Check if we're using a real hardware port or vtty, not loop://"""
+    """Check if we're using a real hardware port or tty0tty, not loop://"""
     return not get_port().startswith('loop://')
 
 
 # Use pytest.mark.skipif which evaluates at collection time
 pytestmark = pytest.mark.skipif(
     os.environ.get('PYSERIAL_PORT', 'loop://').startswith('loop://'),
-    reason="Requires real hardware or vtty (not loop://)"
+    reason="Requires real hardware or tty0tty (not loop://)"
 )
 
 
 # Keep the unittest decorator for backwards compatibility when run standalone
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_HardwareFlowControl(unittest.TestCase):
     """Test that hardware flow control actually works"""
 
@@ -131,25 +103,25 @@ class Test_HardwareFlowControl(unittest.TestCase):
             pass
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_ParityValidation(unittest.TestCase):
     """Test that parity bits are actually generated and checked"""
 
     def test_parity_even(self):
         """Test that even parity works correctly"""
-        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s_tx.write(test_data)
-            s_tx.flush()
+            s.write(test_data)
+            s.flush()
             time.sleep(0.1)
 
-            received = s_rx.read(len(test_data))
+            received = s.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            if s_tx != s_rx:
+            s.close()
                 s_tx.close()
                 s_rx.close()
             else:
@@ -157,19 +129,19 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
-        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s_tx.write(test_data)
-            s_tx.flush()
+            s.write(test_data)
+            s.flush()
             time.sleep(0.1)
 
-            received = s_rx.read(len(test_data))
+            received = s.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            if s_tx != s_rx:
+            s.close()
                 s_tx.close()
                 s_rx.close()
             else:
@@ -177,80 +149,80 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_none(self):
         """Test that no parity works correctly"""
-        s_tx, s_rx = open_loopback_pair(baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
+        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s_tx.write(test_data)
-            s_tx.flush()
+            s.write(test_data)
+            s.flush()
             time.sleep(0.1)
 
-            received = s_rx.read(len(test_data))
+            received = s.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with no parity")
         finally:
-            if s_tx != s_rx:
+            s.close()
                 s_tx.close()
                 s_rx.close()
             else:
                 s_tx.close()
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_ByteSize(unittest.TestCase):
     """Test that character size (bits per byte) is enforced"""
 
-    @unittest.skip("vtty doesn't enforce bytesize/parity at driver level")
+    @unittest.skip("tty0tty doesn't enforce bytesize/parity at driver level")
     def test_bytesize_7(self):
         """Test 7-bit character size masks high bit"""
-        s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.SEVENBITS,
+        s = serial.Serial(get_port(),  baudrate=9600, bytesize=serial.SEVENBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
             # With 7 bits, high bit should be masked off
             # Send 0xFF (11111111), should receive 0x7F (01111111)
             test_data = b'\xFF\xAA\x80'
-            s_tx.write(test_data)
-            s_tx.flush()
+            s.write(test_data)
+            s.flush()
             time.sleep(0.1)
 
-            received = s_rx.read(len(test_data))
+            received = s.read(len(test_data))
             # High bit should be masked in 7-bit mode
             expected = bytes([b & 0x7F for b in test_data])
             self.assertEqual(received, expected,
                            "High bit should be masked in 7-bit mode")
         finally:
-            if s_tx != s_rx:
+            s.close()
                 s_tx.close()
                 s_rx.close()
             else:
                 s_tx.close()
 
-    @unittest.skip("vtty doesn't enforce bytesize/parity at driver level")
+    @unittest.skip("tty0tty doesn't enforce bytesize/parity at driver level")
     def test_bytesize_8(self):
         """Test 8-bit character size preserves all bits"""
-        s_tx, s_rx = open_loopback_pair( baudrate=9600, bytesize=serial.EIGHTBITS,
+        s = serial.Serial(get_port(),  baudrate=9600, bytesize=serial.EIGHTBITS,
                           parity=serial.PARITY_NONE, timeout=1)
 
         try:
             # With 8 bits, all bits should pass through
             test_data = b'\xFF\xAA\x80\x00\x7F'
-            s_tx.write(test_data)
-            s_tx.flush()
+            s.write(test_data)
+            s.flush()
             time.sleep(0.1)
 
-            received = s_rx.read(len(test_data))
+            received = s.read(len(test_data))
             self.assertEqual(received, test_data,
                            "All 8 bits should pass through in 8-bit mode")
         finally:
-            if s_tx != s_rx:
+            s.close()
                 s_tx.close()
                 s_rx.close()
             else:
                 s_tx.close()
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_BaudRate(unittest.TestCase):
     """Test baud rate timing accuracy"""
 
@@ -299,7 +271,7 @@ class Test_BaudRate(unittest.TestCase):
                     s.close()
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_StopBits(unittest.TestCase):
     """Test stop bits configuration"""
 
@@ -332,7 +304,7 @@ class Test_StopBits(unittest.TestCase):
             s.close()
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 class Test_MixedSettings(unittest.TestCase):
     """Test various combinations of serial port settings"""
 
@@ -374,7 +346,7 @@ class Test_MixedSettings(unittest.TestCase):
                     s.close()
 
 
-@unittest.skipUnless(is_hardware_port(), "Requires real hardware or vtty (not loop://)")
+@unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
 @unittest.skipIf(not hasattr(serial.Serial, 'send_break'), "send_break not supported on platform")
 class Test_BreakSignal(unittest.TestCase):
     """Test break signal generation"""
