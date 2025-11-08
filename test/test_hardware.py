@@ -59,32 +59,43 @@ pytestmark = pytest.mark.skipif(
 class Test_HardwareFlowControl(unittest.TestCase):
     """Test that hardware flow control actually works"""
 
-    def setUp(self):
-        self.s = serial.Serial(get_port(), baudrate=115200, timeout=1, write_timeout=1)
-
-    def tearDown(self):
-        self.s.close()
-
     def test_rtscts_flow_control(self):
-        """Test that RTS/CTS signals are connected in loopback"""
-        # In tty0tty single-port loopback, RTS is automatically wired to CTS
-        # We can verify the modem line connection works
+        """Test that RTS/CTS signals are connected between paired ports"""
+        # tty0tty creates pairs: /dev/tnt0 <-> /dev/tnt1
+        # RTS on one side connects to CTS on the other side
+        port = get_port()
 
-        # With RTS high, CTS should be high
-        self.s.rts = True
-        time.sleep(0.05)  # Allow signal to propagate
-        self.assertTrue(self.s.cts, "CTS should be high when RTS is high")
+        # Get the paired port (tnt0->tnt1, tnt1->tnt0, etc)
+        if 'tnt' in port:
+            port_num = int(port[-1])
+            paired_num = port_num ^ 1  # XOR with 1 to flip between even/odd
+            paired_port = port[:-1] + str(paired_num)
+        else:
+            # For real hardware, skip this test
+            self.skipTest("Requires tty0tty paired ports")
+            return
 
-        # With RTS low, CTS should be low
-        self.s.rts = False
-        time.sleep(0.05)  # Allow signal to propagate
-        self.assertFalse(self.s.cts, "CTS should be low when RTS is low")
+        s1 = serial.Serial(port, baudrate=115200, timeout=1)
+        s2 = serial.Serial(paired_port, baudrate=115200, timeout=1)
 
-        # Verify we can send data with RTS high
-        self.s.rts = True
-        time.sleep(0.05)
-        self.s.write(b'test')
-        self.s.flush()
+        try:
+            # s1's RTS should appear as s2's CTS
+            s1.rts = True
+            time.sleep(0.05)
+            self.assertTrue(s2.cts, "Paired port CTS should be high when RTS is high")
+
+            s1.rts = False
+            time.sleep(0.05)
+            self.assertFalse(s2.cts, "Paired port CTS should be low when RTS is low")
+
+            # And vice versa
+            s2.rts = True
+            time.sleep(0.05)
+            self.assertTrue(s1.cts, "Paired port CTS should be high when RTS is high")
+
+        finally:
+            s1.close()
+            s2.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
