@@ -34,9 +34,11 @@ import fcntl
 import os
 import platform
 import select
+import stat
 import struct
 import sys
 import termios
+import time
 
 import serial
 from serial.serialutil import SerialBase, SerialException, to_bytes, \
@@ -674,9 +676,49 @@ class Serial(SerialBase, PlatformSpecific):
         """\
         Flush of file like objects. In this case, wait until all data
         is written.
+
+        On macOS with PTY devices, tcdrain() can block indefinitely due to
+        a known kernel issue. This implementation uses polling on macOS to
+        avoid the hang.
         """
         if not self.is_open:
             raise PortNotOpenError()
+
+        # On macOS, tcdrain() can block indefinitely on PTY devices
+        # See: https://github.com/pyserial/pyserial/issues/625
+        #      https://github.com/python/cpython/issues/97001
+        if sys.platform.startswith('darwin'):
+            try:
+                # Check if this is a PTY by examining the device mode
+                mode = os.fstat(self.fd).st_mode
+                if stat.S_ISCHR(mode):
+                    # Get the device name to check if it's a PTY
+                    try:
+                        dev_name = os.ttyname(self.fd)
+                        # macOS: /dev/ttys* or /dev/pty*
+                        # Linux: /dev/pts/* or /dev/tty*
+                        is_pty = ('/dev/ttys' in dev_name or
+                                  '/dev/ptyp' in dev_name or
+                                  '/dev/ptyq' in dev_name or
+                                  '/dev/ptyr' in dev_name or
+                                  '/dev/ptys' in dev_name or
+                                  '/dev/pts/' in dev_name)
+                    except (OSError, AttributeError):
+                        # If we can't determine, assume it might be a PTY
+                        is_pty = True
+
+                    if is_pty:
+                        # For PTY devices on macOS, tcdrain() blocks indefinitely
+                        # because it waits for data to be read from the other end,
+                        # which may never happen. Since the data is already in the
+                        # kernel buffer after write(), we can consider flush() complete.
+                        # This matches the behavior that Linux PTYs have.
+                        return
+            except (OSError, IOError):
+                # If any of the checks fail, fall back to tcdrain
+                pass
+
+        # Standard tcdrain for non-macOS or non-PTY devices
         termios.tcdrain(self.fd)
 
     def _reset_input_buffer(self):

@@ -1,0 +1,6 @@
+{
+  "ToxEnv": {
+    "name": "coverage-erase",
+    "type": "VirtualEnvRunner"
+  }
+}
