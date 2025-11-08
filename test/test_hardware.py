@@ -47,6 +47,19 @@ def is_hardware_port():
     return not get_port().startswith('loop://')
 
 
+def get_port_pair():
+    """Get both ports for tty0tty paired testing"""
+    port = get_port()
+    if 'tnt' in port:
+        port_num = int(port[-1])
+        paired_num = port_num ^ 1  # XOR with 1 to flip between even/odd
+        paired_port = port[:-1] + str(paired_num)
+        return port, paired_port
+    else:
+        # For real hardware with actual loopback, same port for both
+        return port, port
+
+
 # Use pytest.mark.skipif which evaluates at collection time
 pytestmark = pytest.mark.skipif(
     os.environ.get('PYSERIAL_PORT', 'loop://').startswith('loop://'),
@@ -104,51 +117,63 @@ class Test_ParityValidation(unittest.TestCase):
 
     def test_parity_even(self):
         """Test that even parity works correctly"""
-        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        port_tx, port_rx = get_port_pair()
+        s_tx = serial.Serial(port_tx, baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        s_rx = serial.Serial(port_rx, baudrate=9600, parity=serial.PARITY_EVEN, timeout=1) if port_tx != port_rx else s_tx
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s.write(test_data)
-            s.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            s.close()
+            if s_tx != s_rx:
+                s_rx.close()
+            s_tx.close()
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
-        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
+        port_tx, port_rx = get_port_pair()
+        s_tx = serial.Serial(port_tx, baudrate=9600, parity=serial.PARITY_ODD, timeout=1)
+        s_rx = serial.Serial(port_rx, baudrate=9600, parity=serial.PARITY_ODD, timeout=1) if port_tx != port_rx else s_tx
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s.write(test_data)
-            s.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
-            s.close()
+            if s_tx != s_rx:
+                s_rx.close()
+            s_tx.close()
 
     def test_parity_none(self):
         """Test that no parity works correctly"""
-        s = serial.Serial(get_port(), baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
+        port_tx, port_rx = get_port_pair()
+        s_tx = serial.Serial(port_tx, baudrate=9600, parity=serial.PARITY_NONE, timeout=1)
+        s_rx = serial.Serial(port_rx, baudrate=9600, parity=serial.PARITY_NONE, timeout=1) if port_tx != port_rx else s_tx
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
-            s.write(test_data)
-            s.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
 
-            received = s.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with no parity")
         finally:
-            s.close()
+            if s_tx != s_rx:
+                s_rx.close()
+            s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
@@ -204,22 +229,29 @@ class Test_BaudRate(unittest.TestCase):
     def test_baud_rate_timing(self):
         """Test that different baud rates have measurably different timing"""
         test_data = b'X' * 100
+        port_tx, port_rx = get_port_pair()
 
         # Test at 9600 baud
-        s_slow = serial.Serial(get_port(), baudrate=9600, timeout=5)
+        s_tx = serial.Serial(port_tx, baudrate=9600, timeout=5)
+        s_rx = serial.Serial(port_rx, baudrate=9600, timeout=5) if port_tx != port_rx else s_tx
         start = time.time()
-        s_slow.write(test_data)
-        s_slow.flush()  # Wait for transmission to complete
+        s_tx.write(test_data)
+        s_tx.flush()  # Wait for transmission to complete
         time_slow = time.time() - start
-        s_slow.close()
+        if s_tx != s_rx:
+            s_rx.close()
+        s_tx.close()
 
         # Test at 115200 baud
-        s_fast = serial.Serial(get_port(), baudrate=115200, timeout=5)
+        s_tx = serial.Serial(port_tx, baudrate=115200, timeout=5)
+        s_rx = serial.Serial(port_rx, baudrate=115200, timeout=5) if port_tx != port_rx else s_tx
         start = time.time()
-        s_fast.write(test_data)
-        s_fast.flush()  # Wait for transmission to complete
+        s_tx.write(test_data)
+        s_tx.flush()  # Wait for transmission to complete
         time_fast = time.time() - start
-        s_fast.close()
+        if s_tx != s_rx:
+            s_rx.close()
+        s_tx.close()
 
         # 115200 should be roughly 12x faster than 9600
         # At minimum, it should be noticeably faster
@@ -230,20 +262,24 @@ class Test_BaudRate(unittest.TestCase):
         """Test that common baud rates can be set and used"""
         standard_bauds = [9600, 19200, 38400, 57600, 115200]
         test_data = b'test'
+        port_tx, port_rx = get_port_pair()
 
         for baud in standard_bauds:
             with self.subTest(baudrate=baud):
-                s = serial.Serial(get_port(), baudrate=baud, timeout=1)
+                s_tx = serial.Serial(port_tx, baudrate=baud, timeout=1)
+                s_rx = serial.Serial(port_rx, baudrate=baud, timeout=1) if port_tx != port_rx else s_tx
                 try:
                     # Verify we can send and receive at this baud rate
-                    s.write(test_data)
-                    s.flush()
+                    s_tx.write(test_data)
+                    s_tx.flush()
                     time.sleep(0.1)
-                    received = s.read(len(test_data))
+                    received = s_rx.read(len(test_data))
                     self.assertEqual(received, test_data,
                                    f"Data integrity should be maintained at {baud} baud")
                 finally:
-                    s.close()
+                    if s_tx != s_rx:
+                        s_rx.close()
+                    s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
@@ -252,31 +288,39 @@ class Test_StopBits(unittest.TestCase):
 
     def test_stopbits_one(self):
         """Test 1 stop bit configuration"""
-        s = serial.Serial(get_port(), baudrate=9600, stopbits=serial.STOPBITS_ONE, timeout=1)
+        port_tx, port_rx = get_port_pair()
+        s_tx = serial.Serial(port_tx, baudrate=9600, stopbits=serial.STOPBITS_ONE, timeout=1)
+        s_rx = serial.Serial(port_rx, baudrate=9600, stopbits=serial.STOPBITS_ONE, timeout=1) if port_tx != port_rx else s_tx
         try:
             test_data = b'test with 1 stop bit'
-            s.write(test_data)
-            s.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
-            received = s.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with 1 stop bit")
         finally:
-            s.close()
+            if s_tx != s_rx:
+                s_rx.close()
+            s_tx.close()
 
     def test_stopbits_two(self):
         """Test 2 stop bits configuration"""
-        s = serial.Serial(get_port(), baudrate=9600, stopbits=serial.STOPBITS_TWO, timeout=1)
+        port_tx, port_rx = get_port_pair()
+        s_tx = serial.Serial(port_tx, baudrate=9600, stopbits=serial.STOPBITS_TWO, timeout=1)
+        s_rx = serial.Serial(port_rx, baudrate=9600, stopbits=serial.STOPBITS_TWO, timeout=1) if port_tx != port_rx else s_tx
         try:
             test_data = b'test with 2 stop bits'
-            s.write(test_data)
-            s.flush()
+            s_tx.write(test_data)
+            s_tx.flush()
             time.sleep(0.1)
-            received = s.read(len(test_data))
+            received = s_rx.read(len(test_data))
             self.assertEqual(received, test_data,
                            "Data should pass correctly with 2 stop bits")
         finally:
-            s.close()
+            if s_tx != s_rx:
+                s_rx.close()
+            s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
@@ -298,16 +342,20 @@ class Test_MixedSettings(unittest.TestCase):
 
         test_data = b'Config test 123'
 
+        port_tx, port_rx = get_port_pair()
+
         for baud, bits, parity, stop in configs:
             with self.subTest(baudrate=baud, bytesize=bits, parity=parity, stopbits=stop):
-                s = serial.Serial(get_port(), baudrate=baud, bytesize=bits,
-                                parity=parity, stopbits=stop, timeout=1)
+                s_tx = serial.Serial(port_tx, baudrate=baud, bytesize=bits,
+                                    parity=parity, stopbits=stop, timeout=1)
+                s_rx = serial.Serial(port_rx, baudrate=baud, bytesize=bits,
+                                    parity=parity, stopbits=stop, timeout=1) if port_tx != port_rx else s_tx
                 try:
-                    s.write(test_data)
-                    s.flush()
+                    s_tx.write(test_data)
+                    s_tx.flush()
                     time.sleep(0.1)
 
-                    received = s.read(len(test_data))
+                    received = s_rx.read(len(test_data))
 
                     # For 7-bit modes, mask the expected data
                     if bits == 7:
@@ -318,7 +366,9 @@ class Test_MixedSettings(unittest.TestCase):
                     self.assertEqual(received, expected,
                                    f"Config {baud}-{bits}-{parity}-{stop} should work")
                 finally:
-                    s.close()
+                    if s_tx != s_rx:
+                        s_rx.close()
+                    s_tx.close()
 
 
 @unittest.skipUnless(is_hardware_port(), "Requires real hardware or tty0tty (not loop://)")
