@@ -48,9 +48,10 @@ def is_hardware_port():
 
 
 def get_port_pair():
-    """Get both ports for tty0tty paired testing"""
+    """Get both ports for tty0tty/vtty/socat paired testing"""
     port = get_port()
-    if 'tnt' in port:
+    # Check for tty0tty (tnt0/tnt1) or vtty/socat (ttyV0/ttyV1) paired devices
+    if 'tnt' in port or 'ttyV' in port:
         port_num = int(port[-1])
         paired_num = port_num ^ 1  # XOR with 1 to flip between even/odd
         paired_port = port[:-1] + str(paired_num)
@@ -118,22 +119,36 @@ class Test_ParityValidation(unittest.TestCase):
     def test_parity_even(self):
         """Test that even parity works correctly"""
         port_tx, port_rx = get_port_pair()
+        print(f"DEBUG: port_tx={port_tx}, port_rx={port_rx}", flush=True)
+
+        print(f"DEBUG: Opening TX port {port_tx}", flush=True)
         s_tx = serial.Serial(port_tx, baudrate=9600, parity=serial.PARITY_EVEN, timeout=1)
+        print(f"DEBUG: TX port opened", flush=True)
+
+        print(f"DEBUG: Opening RX port {port_rx}", flush=True)
         s_rx = serial.Serial(port_rx, baudrate=9600, parity=serial.PARITY_EVEN, timeout=1) if port_tx != port_rx else s_tx
+        print(f"DEBUG: RX port opened, same_port={port_tx == port_rx}", flush=True)
 
         try:
             test_data = b'\x00\x01\x7F\x80\xFF\xAA\x55'
+            print(f"DEBUG: Writing {len(test_data)} bytes", flush=True)
             s_tx.write(test_data)
+            print(f"DEBUG: Flushing", flush=True)
             s_tx.flush()
+            print(f"DEBUG: Sleeping", flush=True)
             time.sleep(0.1)
 
+            print(f"DEBUG: Reading {len(test_data)} bytes", flush=True)
             received = s_rx.read(len(test_data))
+            print(f"DEBUG: Received {len(received)} bytes: {received!r}", flush=True)
             self.assertEqual(received, test_data,
                            "Data should pass correctly with matching parity")
         finally:
+            print(f"DEBUG: Cleaning up", flush=True)
             if s_tx != s_rx:
                 s_rx.close()
             s_tx.close()
+            print(f"DEBUG: Cleanup complete", flush=True)
 
     def test_parity_odd(self):
         """Test that odd parity works correctly"""
