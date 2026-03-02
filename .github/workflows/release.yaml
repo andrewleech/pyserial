@@ -1,0 +1,117 @@
+name: "📦 Release"
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  test:
+    uses: "./.github/workflows/test.yaml"
+
+  build:
+    name: "Build"
+    needs: test
+    runs-on: "ubuntu-24.04"
+
+    steps:
+      - uses: "actions/checkout@v5"
+        with:
+          fetch-depth: 0
+
+      - uses: "actions/setup-python@v6"
+        with:
+          python-version: "3.14"
+          allow-prereleases: 'true'
+
+      - name: "Install build dependencies"
+        run: |
+          pip install build==1.4.0 twine==6.2.0 uv==0.10.7
+
+      - name: "Build sdist and wheel"
+        run: |
+          python -m build --installer uv --outdir dist/
+
+      - name: "Validate distributions"
+        run: |
+          twine check --strict dist/*
+
+      - name: "Verify version matches tag"
+        env:
+          GIT_TAG: "${{ github.ref_name }}"
+        run: |
+          python -c "
+          import os
+          from pathlib import Path
+          from packaging.utils import parse_wheel_filename
+          from packaging.version import Version
+
+          tag = os.environ['GIT_TAG'].removeprefix('v')
+          whl = next(Path('dist').glob('*.whl'))
+          _, whl_ver, _, _ = parse_wheel_filename(whl.name)
+
+          if Version(tag) != whl_ver:
+              raise SystemExit(
+                  f'::error::Tag ({tag}) does not match wheel ({whl_ver})'
+              )
+          print(f'Version verified: {whl_ver}')
+          "
+
+      - uses: "actions/upload-artifact@v4"
+        with:
+          name: dist
+          path: "dist/"
+          if-no-files-found: error
+
+  github-release:
+    name: "GitHub Release"
+    needs: build
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: write
+
+    steps:
+      - uses: "actions/download-artifact@v4"
+        with:
+          name: dist
+          path: "dist/"
+
+      - uses: "actions/setup-python@v6"
+        with:
+          python-version: "3.x"
+
+      - run: pip install packaging
+
+      - name: "Determine pre-release status"
+        id: prerelease
+        env:
+          GIT_TAG: "${{ github.ref_name }}"
+        run: |
+          python -c "
+          import os
+          from packaging.version import Version
+          v = Version(os.environ['GIT_TAG'].removeprefix('v'))
+          print('is_prerelease=true' if v.is_prerelease else 'is_prerelease=false')
+          " >> "$GITHUB_OUTPUT"
+
+      - uses: "softprops/action-gh-release@v2.5.0"
+        with:
+          files: "dist/*"
+          prerelease: "${{ steps.prerelease.outputs.is_prerelease }}"
+          generate_release_notes: true
+
+  pypi-publish:
+    name: "Publish to PyPI"
+    needs: build
+    runs-on: "ubuntu-24.04"
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: "actions/download-artifact@v4"
+        with:
+          name: dist
+          path: "dist/"
+
+      - uses: "pypa/gh-action-pypi-publish@v1.13.0"
